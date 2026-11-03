@@ -1,17 +1,24 @@
-/// Extrae el "trozo" del GRAI que identifica el modelo de caja.
+/// Extrae del código escaneado el "trozo" que identifica el modelo de caja.
 ///
-/// El GRAI (GS1 AI 8003) tiene la forma: 0 + prefijo de empresa + tipo de
-/// activo + dígito de control (14 dígitos) + número de serie opcional.
-/// Como la longitud del prefijo varía según la empresa, la posición del
-/// trozo que identifica el modelo es CONFIGURABLE (start/length, base 0,
-/// sobre los 14 dígitos del GRAI).
+/// El trozo se define en CARACTERES sobre el texto escaneado completo:
+/// [start] es la posición del primer carácter (1 = el primero) y [length]
+/// cuántos caracteres se cogen. Ambos se configuran en la pantalla de ajustes.
+///
+/// Si el código viene con el identificador de aplicación GS1 delante
+/// ("(8003)..." o "8003...") se descarta antes de contar los caracteres.
 class GraiParser {
-  const GraiParser({this.start = 7, this.length = 4});
+  const GraiParser({this.start = 8, this.length = 4});
 
+  /// Posición del primer carácter del trozo (base 1).
   final int start;
+
+  /// Número de caracteres del trozo.
   final int length;
 
-  /// Admite "(8003)012345..." , "8003012345..." o el GRAI a secas.
+  /// Mínimo de caracteres que debe tener el código para poder extraer el trozo.
+  int get minChars => start - 1 + length;
+
+  /// Admite "(8003)012345...", "8003012345..." o el GRAI a secas.
   String normalize(String raw) {
     var s = raw.trim().replaceAll(RegExp(r'[()\s]'), '');
     // Si trae el AI 8003 delante y hay datos suficientes, lo quitamos.
@@ -19,11 +26,12 @@ class GraiParser {
     return s;
   }
 
-  /// Devuelve el código de modelo, o null si el código no es válido.
+  /// Devuelve el código de modelo, o null si el código es demasiado corto o la
+  /// configuración no es válida.
   String? extractModelCode(String raw) {
-    final grai = normalize(raw);
-    if (grai.length < 14 || !RegExp(r'^\d{14}').hasMatch(grai)) return null;
-    if (start + length > 14) return null;
-    return grai.substring(start, start + length);
+    if (start < 1 || length < 1) return null;
+    final s = normalize(raw);
+    if (s.length < minChars) return null;
+    return s.substring(start - 1, start - 1 + length);
   }
 }

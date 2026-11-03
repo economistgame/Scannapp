@@ -58,8 +58,8 @@ Cada feature depende solo de `core/`; el escáner no sabe nada del negocio.
 Todo se guarda en la tabla local `settings` y se aplica sin recompilar.
 
 **Identificación de producto**
-- Posición inicial y longitud del trozo de los 14 dígitos del GRAI que identifica el modelo (por defecto 7 y 4). Lo habitual es el *tipo de activo*, cuya posición depende de la longitud del prefijo GS1 de tu empresa.
-- Campo de prueba: pegas un GRAI de ejemplo y ves al momento qué código de modelo saldría.
+- Trozo del código escaneado que identifica el modelo, definido en caracteres: "desde el carácter nº" (1 = el primero) y "nº de caracteres" (por defecto 8 y 4). Si el código lleva delante el identificador 8003, se ignora antes de contar.
+- Campo de prueba: pegas un GRAI de ejemplo y ves al momento qué código de modelo saldría con los valores que has puesto.
 - Catálogo código → modelo editable (añadir, editar, borrar).
 
 **Envío de datos** (selector Ninguno / API / Email)

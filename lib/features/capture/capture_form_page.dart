@@ -87,7 +87,8 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
     final code = parser.extractModelCode(raw);
 
     if (code == null) {
-      _snack('El código escaneado no parece un GRAI válido');
+      _snack('El código escaneado es demasiado corto: hacen falta al menos '
+          '${parser.minChars} caracteres (revisa el trozo en Ajustes)');
       return;
     }
 

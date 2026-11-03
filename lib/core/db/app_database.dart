@@ -185,8 +185,10 @@ class AppDatabase {
     return v == null ? def : int.tryParse(v) ?? def;
   }
 
+  /// Trozo del código escaneado que identifica el modelo, en caracteres.
+  /// `start` es la posición del primer carácter (1 = el primero).
   Future<({int start, int length})> graiModelSlice() async => (
-        start: await _intSetting('grai_model_start', 7),
+        start: await _intSetting('grai_model_start', 8),
         length: await _intSetting('grai_model_length', 4),
       );
 

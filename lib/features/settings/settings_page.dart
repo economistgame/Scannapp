@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/db/app_database.dart';
+import '../grai/grai_parser.dart';
 
 /// Ajustes:
 ///  - Identificación de producto: qué trozo del GRAI identifica el modelo y
@@ -63,8 +64,8 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _save() async {
     final start = int.tryParse(_startCtrl.text);
     final length = int.tryParse(_lengthCtrl.text);
-    if (start == null || length == null || start < 0 || length < 1 || start + length > 14) {
-      _snack('Posición/longitud inválidas (deben caber en los 14 dígitos del GRAI)');
+    if (start == null || length == null || start < 1 || length < 1 || start - 1 + length > 60) {
+      _snack('Indica un carácter inicial (≥ 1) y un nº de caracteres (≥ 1)');
       return;
     }
     if (_mode == 'api' && _apiUrlCtrl.text.trim().isEmpty) {
@@ -87,15 +88,17 @@ class _SettingsPageState extends State<SettingsPage> {
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  /// Previsualiza qué código de modelo saldría con la posición/longitud actual.
+  /// Previsualiza qué código de modelo saldría con los valores actuales.
   String get _preview {
     final start = int.tryParse(_startCtrl.text);
     final length = int.tryParse(_lengthCtrl.text);
-    var s = _sampleCtrl.text.trim().replaceAll(RegExp(r'[()\s]'), '');
-    if (s.startsWith('8003') && s.length >= 18) s = s.substring(4);
-    if (start == null || length == null || s.length < 14) return '—';
-    if (start < 0 || length < 1 || start + length > 14) return '—';
-    return s.substring(start, start + length);
+    if (start == null || length == null || _sampleCtrl.text.trim().isEmpty) {
+      return '—';
+    }
+    final parser = GraiParser(start: start, length: length);
+    final code = parser.extractModelCode(_sampleCtrl.text);
+    if (code != null) return code;
+    return 'el código es demasiado corto (mín. ${parser.minChars} caracteres)';
   }
 
   Future<void> _editModel([({String code, String name})? m]) async {
@@ -151,7 +154,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text('Identificación de producto (GRAI)', style: t),
                 const SizedBox(height: 8),
                 const Text(
-                    'Trozo de los 14 dígitos del GRAI que identifica el modelo de caja (posición desde 0).'),
+                    'Trozo del código escaneado (en caracteres) que identifica el modelo de caja. '
+                    'Cuenta desde el primer carácter del GRAI; si el código lleva delante el '
+                    'identificador 8003, se ignora.'),
                 const SizedBox(height: 8),
                 Row(children: [
                   Expanded(
@@ -160,7 +165,8 @@ class _SettingsPageState extends State<SettingsPage> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
-                          labelText: 'Posición inicial',
+                          labelText: 'Desde el carácter nº',
+                          helperText: '1 = el primero',
                           border: OutlineInputBorder()),
                       onChanged: (_) => setState(() {}),
                     ),
@@ -172,7 +178,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                       decoration: const InputDecoration(
-                          labelText: 'Longitud',
+                          labelText: 'Nº de caracteres',
                           border: OutlineInputBorder()),
                       onChanged: (_) => setState(() {}),
                     ),
