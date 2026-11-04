@@ -61,9 +61,9 @@ class _ScannerPageState extends State<ScannerPage> {
       body: MobileScanner(
         controller: _controller,
         onDetect: _onDetect,
-        placeholderBuilder: (context, child) =>
+        placeholderBuilder: (context) =>
             const Center(child: CircularProgressIndicator()),
-        errorBuilder: (context, error, child) => _CameraError(
+        errorBuilder: (context, error) => _CameraError(
           error: error,
           onRetry: () => _controller.start(),
         ),
