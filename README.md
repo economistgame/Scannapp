@@ -102,4 +102,4 @@ Las carpetas `android/` e `ios/` se generan en CI con `tool/bootstrap_platforms.
 
 Ve a la sección **Releases** del repositorio y descarga el archivo `scannapp-vX.Y.Z.apk` de la última versión. Al instalarlo, Android pedirá permitir instalar apps de orígenes desconocidos. El APK está firmado con la clave de depuración, así que Android puede avisar de que no viene de Google Play.
 
-Para publicar una versión nueva: sube `version` en `pubspec.yaml`, haz commit y crea la etiqueta (`git tag v1.0.1 && git push origin v1.0.1`). El workflow compila y adjunta el APK a la release automáticamente.
+Para publicar una versión: en GitHub, **Actions → Build → Run workflow**, escribe la etiqueta (por ejemplo `v1.0.0`) en *release_tag* y ejecútalo. También se publica sola al subir una etiqueta `v*` con git. En ambos casos el workflow compila y adjunta el APK a la release. Antes de una versión nueva, sube `version` en `pubspec.yaml`.

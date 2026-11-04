@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Etiqueta de la release a publicar con el APK (ej. v1.0.0). Vacío = solo compilar."
+        required: false
+        default: ""
 
 jobs:
   android:
@@ -34,14 +39,25 @@ jobs:
         with:
           name: scannapp-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Calcular etiqueta de release
+        id: rel
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          fi
       - name: Nombrar APK con la versión
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: cp build/app/outputs/flutter-apk/app-release.apk "scannapp-${GITHUB_REF_NAME}.apk"
+        if: steps.rel.outputs.tag != ''
+        run: cp build/app/outputs/flutter-apk/app-release.apk "scannapp-${{ steps.rel.outputs.tag }}.apk"
       - name: Publicar release con el APK
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.rel.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: scannapp-${{ github.ref_name }}.apk
+          tag_name: ${{ steps.rel.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: Scannapp ${{ steps.rel.outputs.tag }}
+          files: scannapp-${{ steps.rel.outputs.tag }}.apk
           generate_release_notes: true
 
   ios:
