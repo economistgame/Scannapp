@@ -5,12 +5,15 @@ import 'package:uuid/uuid.dart';
 import '../../core/db/app_database.dart';
 import '../../core/db/models.dart';
 import '../grai/grai_parser.dart';
+import '../masterdata/master_picker.dart';
 import '../scanner/scanner_page.dart';
 
 /// Formulario de captura:
 /// (1) Pedido: escaneado o a mano
-/// (2) Proveedor: autorrellenado (por pedido o último usado), editable
-/// (3) Líneas: modelo de caja + cantidad, manual o a partir del GRAI
+/// (2) Proveedor: se elige de los datos maestros; se autorrellena (por pedido
+///     o último usado) y el usuario puede cambiarlo
+/// (3) Líneas: producto de los datos maestros + cantidad, manual o a partir
+///     del GRAI
 class CaptureFormPage extends StatefulWidget {
   const CaptureFormPage({super.key, required this.db});
   final AppDatabase db;
@@ -25,15 +28,15 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
   final _supplierCtrl = TextEditingController();
   final _lines = <CaptureLine>[];
   final _uuid = const Uuid();
-  bool _supplierEditedByUser = false;
+  bool _supplierChosenByUser = false;
 
   @override
   void initState() {
     super.initState();
-    // Proveedor por defecto: el último utilizado
+    // Proveedor por defecto: el último utilizado (si sigue en datos maestros)
     widget.db.lastSupplier().then((s) {
       if (s != null && _supplierCtrl.text.isEmpty && mounted) {
-        _supplierCtrl.text = s;
+        setState(() => _supplierCtrl.text = s);
       }
     });
   }
@@ -57,22 +60,57 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
   // ---- (2) Proveedor ------------------------------------------------------
 
   Future<void> _autofillSupplier() async {
-    if (_supplierEditedByUser && _supplierCtrl.text.isNotEmpty) return;
+    if (_supplierChosenByUser) return;
     final s = await widget.db.supplierForOrder(_orderCtrl.text.trim());
     if (s != null && mounted) setState(() => _supplierCtrl.text = s);
   }
 
+  Future<void> _pickSupplier() async {
+    final s = await showMasterPicker(
+      context,
+      title: 'Proveedor',
+      loadItems: widget.db.listSuppliers,
+      onCreate: (name) async {
+        await widget.db.addSupplier(name);
+        return name;
+      },
+    );
+    if (s != null && mounted) {
+      setState(() {
+        _supplierCtrl.text = s;
+        _supplierChosenByUser = true;
+      });
+    }
+  }
+
   // ---- (3) Líneas ---------------------------------------------------------
 
+  /// Selector de producto. Si [graiCode] viene informado, un producto creado
+  /// desde aquí queda asociado a ese código de GRAI.
+  Future<String?> _pickProduct({String? graiCode}) {
+    return showMasterPicker(
+      context,
+      title: 'Producto',
+      loadItems: widget.db.productNames,
+      onCreate: (name) async {
+        try {
+          await widget.db.saveProduct(name: name, code: graiCode);
+          return name;
+        } catch (_) {
+          _snack('No se pudo crear el producto');
+          return null;
+        }
+      },
+    );
+  }
+
   Future<void> _addManualLine() async {
-    final models = await widget.db.modelNames();
-    if (!mounted) return;
     final line = await showDialog<CaptureLine>(
       context: context,
       builder: (_) => _LineDialog(
         id: _uuid.v4(),
-        knownModels: models,
         source: LineSource.manual,
+        pickProduct: () => _pickProduct(),
       ),
     );
     if (line != null) setState(() => _lines.add(line));
@@ -92,26 +130,27 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
       return;
     }
 
-    var modelName = await widget.db.modelNameForCode(code);
-    final models = await widget.db.modelNames();
+    final productName = await widget.db.productNameForCode(code);
     if (!mounted) return;
 
-    // Si el trozo no está en el catálogo local, el usuario lo asigna una vez
-    // y queda guardado para próximas lecturas (también offline).
+    // Si el código no está en los datos maestros, el usuario elige (o crea) el
+    // producto al que corresponde y queda guardado para próximas lecturas.
     final line = await showDialog<CaptureLine>(
       context: context,
       builder: (_) => _LineDialog(
         id: _uuid.v4(),
-        knownModels: models,
         source: LineSource.grai,
-        initialModel: modelName,
+        pickProduct: () =>
+            _pickProduct(graiCode: productName == null ? code : null),
+        initialProduct: productName,
         graiRaw: raw,
         graiCode: code,
-        modelIsKnown: modelName != null,
       ),
     );
     if (line == null) return;
-    if (modelName == null) await widget.db.saveModel(code, line.boxModel);
+    if (productName == null) {
+      await widget.db.linkCodeToProduct(code, line.boxModel);
+    }
     setState(() => _lines.add(line));
   }
 
@@ -163,13 +202,15 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _supplierCtrl,
+              readOnly: true,
+              onTap: _pickSupplier,
               decoration: const InputDecoration(
                 labelText: 'Proveedor',
                 border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.arrow_drop_down),
               ),
-              onChanged: (_) => _supplierEditedByUser = true,
               validator: (v) => (v == null || v.trim().isEmpty)
-                  ? 'Introduce el proveedor'
+                  ? 'Elige el proveedor'
                   : null,
             ),
             const SizedBox(height: 24),
@@ -230,40 +271,45 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
 class _LineDialog extends StatefulWidget {
   const _LineDialog({
     required this.id,
-    required this.knownModels,
     required this.source,
-    this.initialModel,
+    required this.pickProduct,
+    this.initialProduct,
     this.graiRaw,
     this.graiCode,
-    this.modelIsKnown = false,
   });
 
   final String id;
-  final List<String> knownModels;
   final LineSource source;
-  final String? initialModel;
+  final Future<String?> Function() pickProduct;
+  final String? initialProduct;
   final String? graiRaw;
   final String? graiCode;
-  final bool modelIsKnown;
 
   @override
   State<_LineDialog> createState() => _LineDialogState();
 }
 
 class _LineDialogState extends State<_LineDialog> {
-  late final _modelCtrl = TextEditingController(text: widget.initialModel ?? '');
+  late final _productCtrl =
+      TextEditingController(text: widget.initialProduct ?? '');
   final _qtyCtrl = TextEditingController(text: '1');
   final _key = GlobalKey<FormState>();
 
   @override
   void dispose() {
-    _modelCtrl.dispose();
+    _productCtrl.dispose();
     _qtyCtrl.dispose();
     super.dispose();
   }
 
+  Future<void> _pick() async {
+    final p = await widget.pickProduct();
+    if (p != null && mounted) setState(() => _productCtrl.text = p);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final known = widget.initialProduct != null;
     return AlertDialog(
       title: Text(widget.source == LineSource.grai
           ? 'Línea desde GRAI'
@@ -276,24 +322,22 @@ class _LineDialogState extends State<_LineDialog> {
             if (widget.graiCode != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(widget.modelIsKnown
-                    ? 'Código de modelo detectado: ${widget.graiCode}'
-                    : 'Código ${widget.graiCode} sin modelo asignado. '
-                        'Indica el modelo; se recordará para futuros escaneos.'),
+                child: Text(known
+                    ? 'Código ${widget.graiCode} reconocido.'
+                    : 'El código ${widget.graiCode} no está en los datos '
+                        'maestros. Elige el producto al que corresponde '
+                        '(se recordará) o crea uno nuevo.'),
               ),
-            Autocomplete<String>(
-              initialValue: TextEditingValue(text: _modelCtrl.text),
-              optionsBuilder: (v) => widget.knownModels.where(
-                  (m) => m.toLowerCase().contains(v.text.toLowerCase())),
-              onSelected: (v) => _modelCtrl.text = v,
-              fieldViewBuilder: (context, ctrl, focus, _) => TextFormField(
-                controller: ctrl,
-                focusNode: focus,
-                decoration: const InputDecoration(labelText: 'Modelo de caja'),
-                onChanged: (v) => _modelCtrl.text = v,
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+            TextFormField(
+              controller: _productCtrl,
+              readOnly: true,
+              onTap: _pick,
+              decoration: const InputDecoration(
+                labelText: 'Producto',
+                suffixIcon: Icon(Icons.arrow_drop_down),
               ),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Elige un producto' : null,
             ),
             TextFormField(
               controller: _qtyCtrl,
@@ -310,7 +354,8 @@ class _LineDialogState extends State<_LineDialog> {
       ),
       actions: [
         TextButton(
-            onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
         FilledButton(
           onPressed: () {
             if (!_key.currentState!.validate()) return;
@@ -318,7 +363,7 @@ class _LineDialogState extends State<_LineDialog> {
               context,
               CaptureLine(
                 id: widget.id,
-                boxModel: _modelCtrl.text.trim(),
+                boxModel: _productCtrl.text.trim(),
                 quantity: int.parse(_qtyCtrl.text),
                 source: widget.source,
                 graiRaw: widget.graiRaw,

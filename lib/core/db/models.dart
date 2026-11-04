@@ -75,3 +75,12 @@ class Capture {
         'lines': lines.map((l) => l.toJson()).toList(),
       };
 }
+
+/// Producto (modelo de caja) de los datos maestros.
+/// [code] es el trozo del GRAI que lo identifica; null = solo se usa a mano.
+class Product {
+  const Product({required this.id, required this.name, this.code});
+  final int id;
+  final String name;
+  final String? code;
+}

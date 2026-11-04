@@ -13,7 +13,7 @@ class AppDatabase {
     final path = p.join(await getDatabasesPath(), 'caja_scanner.db');
     final db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, _) async {
         await db.execute('''
@@ -33,12 +33,7 @@ class AppDatabase {
             source TEXT NOT NULL,
             grai_raw TEXT
           )''');
-        // Catálogo local: código de modelo extraído del GRAI -> nombre de modelo
-        await db.execute('''
-          CREATE TABLE box_models(
-            code TEXT PRIMARY KEY,
-            name TEXT NOT NULL
-          )''');
+        await _createMasterTables(db);
         // Catálogo local: pedido -> proveedor (para autorrellenar)
         await db.execute('''
           CREATE TABLE order_suppliers(
@@ -48,8 +43,35 @@ class AppDatabase {
         await db.execute('''
           CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)''');
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // v1 -> v2: datos maestros propios (proveedores y productos).
+          await _createMasterTables(db);
+          await db.execute(
+              'INSERT OR IGNORE INTO products(name, code) SELECT name, code FROM box_models');
+          await db.execute(
+              'INSERT OR IGNORE INTO suppliers(name) SELECT DISTINCT supplier FROM order_suppliers');
+          await db.execute(
+              'INSERT OR IGNORE INTO suppliers(name) SELECT DISTINCT supplier FROM captures');
+          await db.execute('DROP TABLE box_models');
+        }
+      },
     );
     return AppDatabase._(db);
+  }
+
+  /// Datos maestros: lista de proveedores y de productos (modelos de caja).
+  static Future<void> _createMasterTables(DatabaseExecutor db) async {
+    // Nombre único sin distinguir mayúsculas.
+    await db.execute(
+        'CREATE TABLE suppliers(name TEXT PRIMARY KEY COLLATE NOCASE)');
+    // Un producto puede tener un código de GRAI (único) o ninguno (solo manual).
+    await db.execute('''
+      CREATE TABLE products(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        code TEXT UNIQUE
+      )''');
   }
 
   // ---- Capturas -----------------------------------------------------------
@@ -106,50 +128,143 @@ class AppDatabase {
   Future<void> deleteCapture(String id) =>
       _db.delete('captures', where: 'id = ?', whereArgs: [id]);
 
-  // ---- Catálogos ----------------------------------------------------------
+  // ---- Autorrelleno de proveedor -----------------------------------------
 
+  /// Proveedor usado antes con ese pedido, si sigue existiendo en datos maestros.
   Future<String?> supplierForOrder(String order) async {
-    final r = await _db.query('order_suppliers',
-        where: 'order_code = ?', whereArgs: [order], limit: 1);
-    return r.isEmpty ? null : r.first['supplier'] as String;
+    final r = await _db.rawQuery(
+      'SELECT s.name AS name FROM order_suppliers os '
+      'JOIN suppliers s ON s.name = os.supplier COLLATE NOCASE '
+      'WHERE os.order_code = ? LIMIT 1',
+      [order],
+    );
+    return r.isEmpty ? null : r.first['name'] as String;
   }
 
+  /// Último proveedor usado, si sigue existiendo en datos maestros.
   Future<String?> lastSupplier() async {
-    final r = await _db.query('settings',
-        where: 'key = ?', whereArgs: ['last_supplier'], limit: 1);
-    return r.isEmpty ? null : r.first['value'] as String;
+    final r = await _db.rawQuery(
+      'SELECT s.name AS name FROM settings st '
+      'JOIN suppliers s ON s.name = st.value COLLATE NOCASE '
+      "WHERE st.key = 'last_supplier' LIMIT 1",
+    );
+    return r.isEmpty ? null : r.first['name'] as String;
   }
 
-  Future<String?> modelNameForCode(String code) async {
-    final r = await _db.query('box_models',
+  // ---- Datos maestros: proveedores ---------------------------------------
+
+  Future<List<String>> listSuppliers() async {
+    final r = await _db.query('suppliers', orderBy: 'name COLLATE NOCASE');
+    return r.map((e) => e['name'] as String).toList();
+  }
+
+  /// Añade el proveedor si no existe (sin distinguir mayúsculas).
+  Future<void> addSupplier(String name) => _db.insert(
+        'suppliers',
+        {'name': name.trim()},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+
+  /// Cambia el nombre. Las capturas ya guardadas conservan el nombre anterior.
+  Future<void> renameSupplier(String oldName, String newName) => _db.update(
+        'suppliers',
+        {'name': newName.trim()},
+        where: 'name = ?',
+        whereArgs: [oldName],
+      );
+
+  Future<void> deleteSupplier(String name) =>
+      _db.delete('suppliers', where: 'name = ?', whereArgs: [name]);
+
+  // ---- Datos maestros: productos -----------------------------------------
+
+  Future<List<Product>> listProducts() async {
+    final r = await _db.query('products', orderBy: 'name COLLATE NOCASE');
+    return r
+        .map((e) => Product(
+            id: e['id'] as int,
+            name: e['name'] as String,
+            code: e['code'] as String?))
+        .toList();
+  }
+
+  /// Nombres de producto sin repetir (un producto puede tener varios códigos).
+  Future<List<String>> productNames() async {
+    final r = await _db.rawQuery(
+        'SELECT DISTINCT name FROM products ORDER BY name COLLATE NOCASE');
+    return r.map((e) => e['name'] as String).toList();
+  }
+
+  Future<String?> productNameForCode(String code) async {
+    final r = await _db.query('products',
         where: 'code = ?', whereArgs: [code], limit: 1);
     return r.isEmpty ? null : r.first['name'] as String;
   }
 
-  Future<void> saveModel(String code, String name) => _db.insert(
-        'box_models',
-        {'code': code, 'name': name},
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-
-  Future<List<String>> modelNames() async {
-    final r = await _db.query('box_models', orderBy: 'name');
-    return r.map((e) => e['name'] as String).toList();
+  /// Crea (id == null) o actualiza un producto. Lanza excepción si el código
+  /// ya pertenece a otro producto.
+  Future<void> saveProduct({int? id, required String name, String? code}) async {
+    final values = {
+      'name': name.trim(),
+      'code': (code == null || code.trim().isEmpty) ? null : code.trim(),
+    };
+    if (id == null) {
+      await _db.insert('products', values);
+    } else {
+      await _db.update('products', values, where: 'id = ?', whereArgs: [id]);
+    }
   }
 
-  /// Carga/actualiza catálogos descargados del servidor cuando hay conexión.
+  Future<void> deleteProduct(int id) =>
+      _db.delete('products', where: 'id = ?', whereArgs: [id]);
+
+  /// Asocia un código de GRAI a un producto existente (por nombre). Si ese
+  /// producto ya tiene otro código, se añade una entrada nueva con el mismo
+  /// nombre para no perder el anterior.
+  Future<void> linkCodeToProduct(String code, String name) async {
+    await _db.transaction((txn) async {
+      final taken = await txn.query('products',
+          where: 'code = ?', whereArgs: [code], limit: 1);
+      if (taken.isNotEmpty) return;
+      final free = await txn.query('products',
+          where: 'name = ? COLLATE NOCASE AND code IS NULL',
+          whereArgs: [name],
+          limit: 1);
+      if (free.isNotEmpty) {
+        await txn.update('products', {'code': code},
+            where: 'id = ?', whereArgs: [free.first['id']]);
+      } else {
+        await txn.insert('products', {'name': name, 'code': code});
+      }
+    });
+  }
+
+  /// Carga/actualiza los datos maestros descargados del servidor.
   Future<void> upsertCatalogs({
     Map<String, String> models = const {},
     Map<String, String> orderSuppliers = const {},
+    List<String> suppliers = const [],
   }) async {
-    final batch = _db.batch();
-    models.forEach((code, name) => batch.insert(
-        'box_models', {'code': code, 'name': name},
-        conflictAlgorithm: ConflictAlgorithm.replace));
-    orderSuppliers.forEach((o, s) => batch.insert(
-        'order_suppliers', {'order_code': o, 'supplier': s},
-        conflictAlgorithm: ConflictAlgorithm.replace));
-    await batch.commit(noResult: true);
+    await _db.transaction((txn) async {
+      for (final name in suppliers) {
+        await txn.insert('suppliers', {'name': name.trim()},
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      for (final e in models.entries) {
+        final n = await txn.update('products', {'name': e.value},
+            where: 'code = ?', whereArgs: [e.key]);
+        if (n == 0) {
+          await txn.insert('products', {'name': e.value, 'code': e.key});
+        }
+      }
+      for (final e in orderSuppliers.entries) {
+        await txn.insert('suppliers', {'name': e.value.trim()},
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+        await txn.insert(
+            'order_suppliers', {'order_code': e.key, 'supplier': e.value},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+    });
   }
 
   // ---- Ajustes genéricos (clave/valor) -----------------------------------
@@ -165,18 +280,6 @@ class AppDatabase {
         {'key': key, 'value': value},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-
-  // ---- Catálogo de modelos (para editarlo desde ajustes) -----------------
-
-  Future<List<({String code, String name})>> listModels() async {
-    final r = await _db.query('box_models', orderBy: 'code');
-    return r
-        .map((e) => (code: e['code'] as String, name: e['name'] as String))
-        .toList();
-  }
-
-  Future<void> deleteModel(String code) =>
-      _db.delete('box_models', where: 'code = ?', whereArgs: [code]);
 
   // ---- Configuración del parser GRAI -------------------------------------
 

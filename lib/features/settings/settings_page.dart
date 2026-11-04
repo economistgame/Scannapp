@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/db/app_database.dart';
 import '../grai/grai_parser.dart';
+import '../masterdata/master_data_page.dart';
 
 /// Ajustes:
 ///  - Identificación de producto: qué trozo del GRAI identifica el modelo y
@@ -24,7 +25,6 @@ class _SettingsPageState extends State<SettingsPage> {
   final _emailCtrl = TextEditingController();
   final _sampleCtrl = TextEditingController();
   String _mode = 'none';
-  List<({String code, String name})> _models = [];
   bool _loaded = false;
 
   @override
@@ -42,7 +42,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _apiTokenCtrl.text = await db.getSetting('api_token') ?? '';
     _emailCtrl.text = await db.getSetting('email_to') ?? '';
     _mode = await db.getSetting('sync_mode') ?? 'none';
-    _models = await db.listModels();
     if (mounted) setState(() => _loaded = true);
   }
 
@@ -101,44 +100,6 @@ class _SettingsPageState extends State<SettingsPage> {
     return 'el código es demasiado corto (mín. ${parser.minChars} caracteres)';
   }
 
-  Future<void> _editModel([({String code, String name})? m]) async {
-    final codeCtrl = TextEditingController(text: m?.code ?? '');
-    final nameCtrl = TextEditingController(text: m?.name ?? '');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(m == null ? 'Nuevo modelo' : 'Editar modelo'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
-            controller: codeCtrl,
-            enabled: m == null,
-            decoration: const InputDecoration(labelText: 'Código (trozo del GRAI)'),
-          ),
-          TextField(
-            controller: nameCtrl,
-            decoration: const InputDecoration(labelText: 'Nombre del modelo'),
-          ),
-        ]),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancelar')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Guardar')),
-        ],
-      ),
-    );
-    final code = codeCtrl.text.trim();
-    final name = nameCtrl.text.trim();
-    codeCtrl.dispose();
-    nameCtrl.dispose();
-    if (ok != true || code.isEmpty || name.isEmpty) return;
-    await widget.db.saveModel(code, name);
-    _models = await widget.db.listModels();
-    if (mounted) setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme.titleMedium;
@@ -195,27 +156,20 @@ class _SettingsPageState extends State<SettingsPage> {
                   onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(child: Text('Catálogo de modelos', style: t)),
-                  IconButton(
-                      icon: const Icon(Icons.add), onPressed: () => _editModel()),
-                ]),
-                if (_models.isEmpty) const Text('Sin modelos todavía'),
-                for (final m in _models)
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(m.name),
-                    subtitle: Text('Código: ${m.code}'),
-                    onTap: () => _editModel(m),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () async {
-                        await widget.db.deleteModel(m.code);
-                        _models = await widget.db.listModels();
-                        if (mounted) setState(() {});
-                      },
-                    ),
-                  ),
+                const Divider(height: 32),
+                Text('Datos maestros', style: t),
+                const SizedBox(height: 8),
+                const Text(
+                    'Listas de proveedores y de productos (con su código de GRAI). '
+                    'Al capturar solo se puede elegir lo que haya aquí.'),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.inventory_2_outlined),
+                  title: const Text('Proveedores y productos'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                      builder: (_) => MasterDataPage(db: widget.db))),
+                ),
                 const Divider(height: 32),
                 Text('Envío de datos', style: t),
                 const SizedBox(height: 8),

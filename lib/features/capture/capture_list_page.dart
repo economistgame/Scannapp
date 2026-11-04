@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../core/db/app_database.dart';
 import '../../core/db/models.dart';
 import '../../core/sync/sync_service.dart';
+import '../masterdata/master_data_page.dart';
 import '../settings/settings_page.dart';
 import 'capture_form_page.dart';
 
@@ -61,6 +62,12 @@ class _CaptureListPageState extends State<CaptureListPage> {
               padding: const EdgeInsets.only(right: 4),
               child: Text('Pendientes: $pending'),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined),
+            tooltip: 'Datos maestros',
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                builder: (_) => MasterDataPage(db: widget.db))),
           ),
           IconButton(
             icon: const Icon(Icons.settings),

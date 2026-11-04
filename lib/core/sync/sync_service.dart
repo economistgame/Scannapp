@@ -10,14 +10,21 @@ import 'package:path_provider/path_provider.dart';
 import '../db/app_database.dart';
 import '../db/models.dart';
 
+/// Datos maestros que descarga la app: productos (código GRAI -> nombre),
+/// proveedores y la relación pedido -> proveedor.
+typedef Catalogs = ({
+  Map<String, String> models,
+  Map<String, String> orderSuppliers,
+  List<String> suppliers,
+});
+
 /// Contrato con el backend. Sustituye la implementación por tu API real.
 abstract class RemoteApi {
   /// Envía una captura. Debe ser idempotente por `capture.id`.
   Future<void> pushCapture(Capture capture);
 
-  /// Descarga catálogos (modelos de caja y pedido -> proveedor).
-  Future<({Map<String, String> models, Map<String, String> orderSuppliers})>
-      fetchCatalogs();
+  /// Descarga los datos maestros (productos, proveedores, pedido -> proveedor).
+  Future<Catalogs> fetchCatalogs();
 }
 
 /// Implementación HTTP de ejemplo. Ajusta URL, autenticación y formato.
@@ -44,14 +51,14 @@ class HttpRemoteApi implements RemoteApi {
   }
 
   @override
-  Future<({Map<String, String> models, Map<String, String> orderSuppliers})>
-      fetchCatalogs() async {
+  Future<Catalogs> fetchCatalogs() async {
     final r = await http.get(Uri.parse('$baseUrl/catalogs'), headers: _headers);
     if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
     final j = jsonDecode(r.body) as Map<String, dynamic>;
     return (
       models: Map<String, String>.from(j['models'] ?? {}),
       orderSuppliers: Map<String, String>.from(j['orderSuppliers'] ?? {}),
+      suppliers: List<String>.from(j['suppliers'] ?? const []),
     );
   }
 }
@@ -124,7 +131,9 @@ class SyncService {
       try {
         final cat = await api.fetchCatalogs();
         await _db.upsertCatalogs(
-            models: cat.models, orderSuppliers: cat.orderSuppliers);
+            models: cat.models,
+            orderSuppliers: cat.orderSuppliers,
+            suppliers: cat.suppliers);
       } catch (_) {/* catálogos opcionales */}
 
       onChanged?.call();
