@@ -58,7 +58,72 @@ class _ScannerPageState extends State<ScannerPage> {
           ),
         ],
       ),
-      body: MobileScanner(controller: _controller, onDetect: _onDetect),
+      body: MobileScanner(
+        controller: _controller,
+        onDetect: _onDetect,
+        placeholderBuilder: (context, child) =>
+            const Center(child: CircularProgressIndicator()),
+        errorBuilder: (context, error, child) => _CameraError(
+          error: error,
+          onRetry: () => _controller.start(),
+        ),
+      ),
+    );
+  }
+}
+
+/// Explica por qué no arranca la cámara en lugar de dejar la pantalla en negro.
+class _CameraError extends StatelessWidget {
+  const _CameraError({required this.error, required this.onRetry});
+  final MobileScannerException error;
+  final VoidCallback onRetry;
+
+  String get _explanation {
+    switch (error.errorCode) {
+      case MobileScannerErrorCode.permissionDenied:
+        return 'La app no tiene permiso para usar la cámara.\n\n'
+            'Ábrela desde Ajustes del móvil → Aplicaciones → Scannapp → '
+            'Permisos → Cámara → Permitir, y pulsa Reintentar.';
+      case MobileScannerErrorCode.unsupported:
+        return 'Este dispositivo no admite el escáner de la cámara.';
+      default:
+        return 'No se pudo iniciar la cámara.';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final details = error.errorDetails?.message;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.no_photography, size: 48),
+            const SizedBox(height: 16),
+            Text(_explanation, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            SelectableText(
+              'Código: ${error.errorCode.name}'
+              '${details == null ? '' : '\n$details'}',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reintentar'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Volver y escribir a mano'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
