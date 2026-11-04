@@ -97,3 +97,9 @@ El workflow `.github/workflows/build.yml` compila en cada push a `main`, en cada
 - **iOS**: compila sin firma (`scannapp-ios-unsigned`). Comprueba que el código compila, pero no es instalable en un iPhone; para eso hacen falta certificado y perfil de Apple Developer.
 
 Las carpetas `android/` e `ios/` se generan en CI con `tool/bootstrap_platforms.sh`, que además aplica el permiso de cámara, el `mailto` del envío por email y las versiones mínimas (Android 23, iOS 15.5). Si generas esas carpetas en local y las subes al repositorio, el script respeta lo que ya exista.
+
+## Descargar la app (Android)
+
+Ve a la sección **Releases** del repositorio y descarga el archivo `scannapp-vX.Y.Z.apk` de la última versión. Al instalarlo, Android pedirá permitir instalar apps de orígenes desconocidos. El APK está firmado con la clave de depuración, así que Android puede avisar de que no viene de Google Play.
+
+Para publicar una versión nueva: sube `version` en `pubspec.yaml`, haz commit y crea la etiqueta (`git tag v1.0.1 && git push origin v1.0.1`). El workflow compila y adjunta el APK a la release automáticamente.

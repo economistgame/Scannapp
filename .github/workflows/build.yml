@@ -3,6 +3,7 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -10,6 +11,8 @@ jobs:
   android:
     name: Android (APK)
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # necesario para adjuntar el APK a la release
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -31,6 +34,15 @@ jobs:
         with:
           name: scannapp-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Nombrar APK con la versión
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cp build/app/outputs/flutter-apk/app-release.apk "scannapp-${GITHUB_REF_NAME}.apk"
+      - name: Publicar release con el APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: scannapp-${{ github.ref_name }}.apk
+          generate_release_notes: true
 
   ios:
     name: iOS (sin firma)
