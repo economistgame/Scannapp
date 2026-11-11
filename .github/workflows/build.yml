@@ -8,16 +8,18 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Etiqueta de la release a publicar con el APK (ej. v1.0.0). Vacío = solo compilar."
+        description: "Etiqueta de la release a publicar con el APK y el IPA (ej. v1.0.0). Vacío = solo compilar."
         required: false
         default: ""
+
+env:
+  # Con etiqueta v* o con release_tag manual se publica una release; si no, solo se compila.
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || inputs.release_tag }}
 
 jobs:
   android:
     name: Android (APK)
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # necesario para adjuntar el APK a la release
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
@@ -39,26 +41,6 @@ jobs:
         with:
           name: scannapp-android-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-      - name: Calcular etiqueta de release
-        id: rel
-        run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${{ inputs.release_tag }}" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Nombrar APK con la versión
-        if: steps.rel.outputs.tag != ''
-        run: cp build/app/outputs/flutter-apk/app-release.apk "scannapp-${{ steps.rel.outputs.tag }}.apk"
-      - name: Publicar release con el APK
-        if: steps.rel.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.rel.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          name: Scannapp ${{ steps.rel.outputs.tag }}
-          files: scannapp-${{ steps.rel.outputs.tag }}.apk
-          generate_release_notes: true
 
   ios:
     name: iOS (sin firma)
@@ -74,11 +56,44 @@ jobs:
       - run: flutter pub get
       - name: Compilar iOS (sin firma)
         run: flutter build ios --release --no-codesign
-      - name: Empaquetar Runner.app
+      # Solo al publicar una versión se genera el .ipa; en una compilación normal
+      # basta con comprobar que compila y no se guarda nada.
+      - name: Generar IPA sin firmar
+        if: env.RELEASE_TAG != ''
         run: |
-          cd build/ios/iphoneos
-          zip -qr "$GITHUB_WORKSPACE/Runner-unsigned.zip" Runner.app
-      - uses: actions/upload-artifact@v4
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry Scannapp-unsigned.ipa Payload
+      - name: Guardar IPA
+        if: env.RELEASE_TAG != ''
+        uses: actions/upload-artifact@v4
         with:
-          name: scannapp-ios-unsigned
-          path: Runner-unsigned.zip
+          name: scannapp-ios-ipa
+          path: Scannapp-unsigned.ipa
+
+  publish:
+    name: Publicar release
+    needs: [android, ios]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # necesario para crear la release y adjuntar los archivos
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scannapp-*
+          path: dist
+          merge-multiple: true
+      - name: Nombrar archivos con la versión
+        run: |
+          mv dist/app-release.apk "dist/scannapp-${RELEASE_TAG}.apk"
+          mv dist/Scannapp-unsigned.ipa "dist/scannapp-${RELEASE_TAG}-ios-sin-firmar.ipa"
+          ls -l dist
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Scannapp ${{ env.RELEASE_TAG }}
+          files: dist/*
+          generate_release_notes: true

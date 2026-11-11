@@ -100,12 +100,14 @@ Todo se guarda en la tabla local `settings` y se aplica sin recompilar.
 El workflow `.github/workflows/build.yml` compila en cada push a `main`, en cada pull request y manualmente (pestaña **Actions → Build → Run workflow**).
 
 - **Android**: genera un APK instalable (`scannapp-android-apk`), firmado con la clave de depuración.
-- **iOS**: compila sin firma (`scannapp-ios-unsigned`). Comprueba que el código compila, pero no es instalable en un iPhone; para eso hacen falta certificado y perfil de Apple Developer.
+- **iOS**: en las compilaciones normales solo comprueba que el código compila, sin generar ningún archivo. Al publicar una versión genera además un `.ipa` sin firmar y lo adjunta a la release. No se instala tal cual en un iPhone: hace falta firmarlo (Apple Developer, o una herramienta de sideloading como AltStore o Sideloadly, que lo firma con un Apple ID gratuito y caduca a los 7 días).
 
 Las carpetas `android/` e `ios/` se generan en CI con `tool/bootstrap_platforms.sh`, que además aplica el permiso de cámara, el `mailto` del envío por email y las versiones mínimas (Android 23, iOS 15.5). Si generas esas carpetas en local y las subes al repositorio, el script respeta lo que ya exista.
 
 ## Descargar la app (Android)
 
 Ve a la sección **Releases** del repositorio y descarga el archivo `scannapp-vX.Y.Z.apk` de la última versión. Al instalarlo, Android pedirá permitir instalar apps de orígenes desconocidos. El APK está firmado con la clave de depuración, así que Android puede avisar de que no viene de Google Play.
+
+La release también incluye `scannapp-vX.Y.Z-ios-sin-firmar.ipa`, el equivalente para iOS (ver arriba).
 
 Para publicar una versión: en GitHub, **Actions → Build → Run workflow**, escribe la etiqueta (por ejemplo `v1.0.0`) en *release_tag* y ejecútalo. También se publica sola al subir una etiqueta `v*` con git. En ambos casos el workflow compila y adjunta el APK a la release. Antes de una versión nueva, sube `version` en `pubspec.yaml`.
