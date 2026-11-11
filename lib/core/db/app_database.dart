@@ -13,7 +13,7 @@ class AppDatabase {
     final path = p.join(await getDatabasesPath(), 'caja_scanner.db');
     final db = await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onCreate: (db, _) async {
         await db.execute('''
@@ -48,12 +48,31 @@ class AppDatabase {
           // v1 -> v2: datos maestros propios (proveedores y productos).
           await _createMasterTables(db);
           await db.execute(
-              'INSERT OR IGNORE INTO products(name, code) SELECT name, code FROM box_models');
+              'INSERT INTO products(name) SELECT DISTINCT name FROM box_models');
           await db.execute(
               'INSERT OR IGNORE INTO suppliers(name) SELECT DISTINCT supplier FROM order_suppliers');
           await db.execute(
               'INSERT OR IGNORE INTO suppliers(name) SELECT DISTINCT supplier FROM captures');
           await db.execute('DROP TABLE box_models');
+        } else if (oldVersion < 3) {
+          // v2 -> v3: el código del producto pasa a ser su EAN. Los códigos
+          // antiguos (trozos de GRAI) que no son un EAN válido se descartan.
+          await db.execute('''
+            CREATE TABLE products_new(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              ean TEXT UNIQUE
+            )''');
+          await db.execute('''
+            INSERT INTO products_new(id, name, ean)
+            SELECT id, name,
+              CASE WHEN code IS NOT NULL
+                    AND length(code) IN (8, 12, 13, 14)
+                    AND code NOT GLOB '*[^0-9]*'
+                   THEN code ELSE NULL END
+            FROM products''');
+          await db.execute('DROP TABLE products');
+          await db.execute('ALTER TABLE products_new RENAME TO products');
         }
       },
     );
@@ -65,12 +84,12 @@ class AppDatabase {
     // Nombre único sin distinguir mayúsculas.
     await db.execute(
         'CREATE TABLE suppliers(name TEXT PRIMARY KEY COLLATE NOCASE)');
-    // Un producto puede tener un código de GRAI (único) o ninguno (solo manual).
+    // Un producto puede tener un EAN (único) o ninguno (solo manual).
     await db.execute('''
       CREATE TABLE products(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        code TEXT UNIQUE
+        ean TEXT UNIQUE
       )''');
   }
 
@@ -184,29 +203,29 @@ class AppDatabase {
         .map((e) => Product(
             id: e['id'] as int,
             name: e['name'] as String,
-            code: e['code'] as String?))
+            ean: e['ean'] as String?))
         .toList();
   }
 
-  /// Nombres de producto sin repetir (un producto puede tener varios códigos).
+  /// Nombres de producto sin repetir (un modelo puede tener varios EAN).
   Future<List<String>> productNames() async {
     final r = await _db.rawQuery(
         'SELECT DISTINCT name FROM products ORDER BY name COLLATE NOCASE');
     return r.map((e) => e['name'] as String).toList();
   }
 
-  Future<String?> productNameForCode(String code) async {
+  Future<String?> productNameForEan(String ean) async {
     final r = await _db.query('products',
-        where: 'code = ?', whereArgs: [code], limit: 1);
+        where: 'ean = ?', whereArgs: [ean], limit: 1);
     return r.isEmpty ? null : r.first['name'] as String;
   }
 
-  /// Crea (id == null) o actualiza un producto. Lanza excepción si el código
+  /// Crea (id == null) o actualiza un producto. Lanza excepción si el EAN
   /// ya pertenece a otro producto.
-  Future<void> saveProduct({int? id, required String name, String? code}) async {
+  Future<void> saveProduct({int? id, required String name, String? ean}) async {
     final values = {
       'name': name.trim(),
-      'code': (code == null || code.trim().isEmpty) ? null : code.trim(),
+      'ean': (ean == null || ean.trim().isEmpty) ? null : ean.trim(),
     };
     if (id == null) {
       await _db.insert('products', values);
@@ -218,28 +237,29 @@ class AppDatabase {
   Future<void> deleteProduct(int id) =>
       _db.delete('products', where: 'id = ?', whereArgs: [id]);
 
-  /// Asocia un código de GRAI a un producto existente (por nombre). Si ese
-  /// producto ya tiene otro código, se añade una entrada nueva con el mismo
-  /// nombre para no perder el anterior.
-  Future<void> linkCodeToProduct(String code, String name) async {
+  /// Asocia un EAN a un producto existente (por nombre). Si ese producto ya
+  /// tiene otro EAN, se añade una entrada nueva con el mismo nombre para no
+  /// perder el anterior.
+  Future<void> linkEanToProduct(String ean, String name) async {
     await _db.transaction((txn) async {
       final taken = await txn.query('products',
-          where: 'code = ?', whereArgs: [code], limit: 1);
+          where: 'ean = ?', whereArgs: [ean], limit: 1);
       if (taken.isNotEmpty) return;
       final free = await txn.query('products',
-          where: 'name = ? COLLATE NOCASE AND code IS NULL',
+          where: 'name = ? COLLATE NOCASE AND ean IS NULL',
           whereArgs: [name],
           limit: 1);
       if (free.isNotEmpty) {
-        await txn.update('products', {'code': code},
+        await txn.update('products', {'ean': ean},
             where: 'id = ?', whereArgs: [free.first['id']]);
       } else {
-        await txn.insert('products', {'name': name, 'code': code});
+        await txn.insert('products', {'name': name, 'ean': ean});
       }
     });
   }
 
   /// Carga/actualiza los datos maestros descargados del servidor.
+  /// [models] es EAN -> nombre del producto.
   Future<void> upsertCatalogs({
     Map<String, String> models = const {},
     Map<String, String> orderSuppliers = const {},
@@ -252,9 +272,9 @@ class AppDatabase {
       }
       for (final e in models.entries) {
         final n = await txn.update('products', {'name': e.value},
-            where: 'code = ?', whereArgs: [e.key]);
+            where: 'ean = ?', whereArgs: [e.key]);
         if (n == 0) {
-          await txn.insert('products', {'name': e.value, 'code': e.key});
+          await txn.insert('products', {'name': e.value, 'ean': e.key});
         }
       }
       for (final e in orderSuppliers.entries) {
@@ -280,28 +300,4 @@ class AppDatabase {
         {'key': key, 'value': value},
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
-
-  // ---- Configuración del parser GRAI -------------------------------------
-
-  Future<int> _intSetting(String key, int def) async {
-    final v = await getSetting(key);
-    return v == null ? def : int.tryParse(v) ?? def;
-  }
-
-  /// Trozo del código escaneado que identifica el modelo, en caracteres.
-  /// `start` es la posición del primer carácter (1 = el primero).
-  Future<({int start, int length})> graiModelSlice() async => (
-        start: await _intSetting('grai_model_start', 8),
-        length: await _intSetting('grai_model_length', 4),
-      );
-
-  Future<void> setGraiModelSlice(int start, int length) async {
-    for (final e in {
-      'grai_model_start': start,
-      'grai_model_length': length
-    }.entries) {
-      await _db.insert('settings', {'key': e.key, 'value': '${e.value}'},
-          conflictAlgorithm: ConflictAlgorithm.replace);
-    }
-  }
 }

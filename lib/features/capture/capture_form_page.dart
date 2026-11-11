@@ -85,19 +85,19 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
 
   // ---- (3) Líneas ---------------------------------------------------------
 
-  /// Selector de producto. Si [graiCode] viene informado, un producto creado
-  /// desde aquí queda asociado a ese código de GRAI.
-  Future<String?> _pickProduct({String? graiCode}) {
+  /// Selector de modelo (por nombre). Si [ean] viene informado, un modelo
+  /// creado desde aquí queda asociado a ese EAN.
+  Future<String?> _pickProduct({String? ean}) {
     return showMasterPicker(
       context,
-      title: 'Producto',
+      title: 'Modelo',
       loadItems: widget.db.productNames,
       onCreate: (name) async {
         try {
-          await widget.db.saveProduct(name: name, code: graiCode);
+          await widget.db.saveProduct(name: name, ean: ean);
           return name;
         } catch (_) {
-          _snack('No se pudo crear el producto');
+          _snack('No se pudo crear el modelo');
           return null;
         }
       },
@@ -120,36 +120,34 @@ class _CaptureFormPageState extends State<CaptureFormPage> {
     final raw = await ScannerPage.scan(context, title: 'Escanear GRAI');
     if (raw == null || !mounted) return;
 
-    final slice = await widget.db.graiModelSlice();
-    final parser = GraiParser(start: slice.start, length: slice.length);
-    final code = parser.extractModelCode(raw);
-
-    if (code == null) {
-      _snack('El código escaneado es demasiado corto: hacen falta al menos '
-          '${parser.minChars} caracteres (revisa el trozo en Ajustes)');
+    final grai = const GraiParser().parse(raw);
+    if (grai == null) {
+      _snack('El código escaneado no parece un GRAI: debe tener 14 dígitos '
+          'que empiecen por 0 (con o sin 8003 delante)');
       return;
     }
 
-    final productName = await widget.db.productNameForCode(code);
+    final productName = await widget.db.productNameForEan(grai.ean);
     if (!mounted) return;
 
-    // Si el código no está en los datos maestros, el usuario elige (o crea) el
-    // producto al que corresponde y queda guardado para próximas lecturas.
+    // Si el EAN no está en los datos maestros, el usuario elige (o crea) el
+    // modelo al que corresponde y queda guardado para próximas lecturas.
     final line = await showDialog<CaptureLine>(
       context: context,
       builder: (_) => _LineDialog(
         id: _uuid.v4(),
         source: LineSource.grai,
         pickProduct: () =>
-            _pickProduct(graiCode: productName == null ? code : null),
+            _pickProduct(ean: productName == null ? grai.ean : null),
         initialProduct: productName,
         graiRaw: raw,
-        graiCode: code,
+        graiEan: grai.ean,
+        graiSerial: grai.serial,
       ),
     );
     if (line == null) return;
     if (productName == null) {
-      await widget.db.linkCodeToProduct(code, line.boxModel);
+      await widget.db.linkEanToProduct(grai.ean, line.boxModel);
     }
     setState(() => _lines.add(line));
   }
@@ -275,7 +273,8 @@ class _LineDialog extends StatefulWidget {
     required this.pickProduct,
     this.initialProduct,
     this.graiRaw,
-    this.graiCode,
+    this.graiEan,
+    this.graiSerial,
   });
 
   final String id;
@@ -283,7 +282,8 @@ class _LineDialog extends StatefulWidget {
   final Future<String?> Function() pickProduct;
   final String? initialProduct;
   final String? graiRaw;
-  final String? graiCode;
+  final String? graiEan;
+  final String? graiSerial;
 
   @override
   State<_LineDialog> createState() => _LineDialogState();
@@ -319,25 +319,25 @@ class _LineDialogState extends State<_LineDialog> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.graiCode != null)
+            if (widget.graiEan != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: Text(known
-                    ? 'Código ${widget.graiCode} reconocido.'
-                    : 'El código ${widget.graiCode} no está en los datos '
-                        'maestros. Elige el producto al que corresponde '
-                        '(se recordará) o crea uno nuevo.'),
+                child: Text(
+                  'EAN ${widget.graiEan}'
+                  '${(widget.graiSerial ?? '').isEmpty ? '' : ' · serie ${widget.graiSerial}'}\n'
+                  '${known ? 'Modelo reconocido.' : 'Este EAN no está en los datos maestros. Elige el modelo al que corresponde (se recordará) o crea uno nuevo.'}',
+                ),
               ),
             TextFormField(
               controller: _productCtrl,
               readOnly: true,
               onTap: _pick,
               decoration: const InputDecoration(
-                labelText: 'Producto',
+                labelText: 'Modelo',
                 suffixIcon: Icon(Icons.arrow_drop_down),
               ),
               validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Elige un producto' : null,
+                  (v == null || v.trim().isEmpty) ? 'Elige un modelo' : null,
             ),
             TextFormField(
               controller: _qtyCtrl,

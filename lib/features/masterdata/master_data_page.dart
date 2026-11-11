@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/db/app_database.dart';
 import '../../core/db/models.dart';
+import '../grai/grai_parser.dart';
 
 /// Datos maestros: la lista de proveedores y la de productos (modelos de caja
 /// con su código de GRAI). En la captura solo se puede elegir de aquí.
@@ -96,16 +98,16 @@ class _MasterDataPageState extends State<MasterDataPage>
   // ---- Productos ----------------------------------------------------------
 
   Future<void> _editProduct([Product? product]) async {
-    final r = await showDialog<({String name, String code})>(
+    final r = await showDialog<({String name, String ean})>(
       context: context,
       builder: (_) => _ProductDialog(initial: product),
     );
     if (r == null || r.name.isEmpty) return;
     try {
       await widget.db
-          .saveProduct(id: product?.id, name: r.name, code: r.code);
+          .saveProduct(id: product?.id, name: r.name, ean: r.ean);
     } catch (_) {
-      _snack('Ese código de GRAI ya está asignado a otro producto');
+      _snack('Ese EAN ya está asignado a otro producto');
     }
     await _reload();
   }
@@ -174,9 +176,8 @@ class _MasterDataPageState extends State<MasterDataPage>
         final p = _products[i];
         return ListTile(
           title: Text(p.name),
-          subtitle: Text(p.code == null
-              ? 'Sin código de GRAI (solo manual)'
-              : 'Código de GRAI: ${p.code}'),
+          subtitle: Text(
+              p.ean == null ? 'Sin EAN (solo manual)' : 'EAN: ${p.ean}'),
           onTap: () => _editProduct(p),
           trailing: IconButton(
             icon: const Icon(Icons.delete_outline),
@@ -255,13 +256,29 @@ class _ProductDialog extends StatefulWidget {
 
 class _ProductDialogState extends State<_ProductDialog> {
   late final _nameCtrl = TextEditingController(text: widget.initial?.name ?? '');
-  late final _codeCtrl = TextEditingController(text: widget.initial?.code ?? '');
+  late final _eanCtrl = TextEditingController(text: widget.initial?.ean ?? '');
+  String? _error;
 
   @override
   void dispose() {
     _nameCtrl.dispose();
-    _codeCtrl.dispose();
+    _eanCtrl.dispose();
     super.dispose();
+  }
+
+  void _save() {
+    final name = _nameCtrl.text.trim();
+    final ean = _eanCtrl.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Escribe el nombre del producto');
+      return;
+    }
+    if (ean.isNotEmpty && !isValidEan(ean)) {
+      setState(() => _error = 'El EAN no es válido: revisa los dígitos '
+          '(13 dígitos, con el dígito de control correcto)');
+      return;
+    }
+    Navigator.pop(context, (name: name, ean: ean));
   }
 
   @override
@@ -272,25 +289,31 @@ class _ProductDialogState extends State<_ProductDialog> {
         TextField(
           controller: _nameCtrl,
           autofocus: true,
-          decoration: const InputDecoration(labelText: 'Nombre del modelo'),
+          decoration:
+              const InputDecoration(labelText: 'Nombre del producto (modelo)'),
         ),
         TextField(
-          controller: _codeCtrl,
+          controller: _eanCtrl,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
           decoration: const InputDecoration(
-            labelText: 'Código de GRAI (opcional)',
-            helperText: 'El trozo definido en Ajustes. Vacío = solo manual.',
+            labelText: 'EAN',
+            helperText: 'Los 13 dígitos del EAN. Vacío = solo manual.',
             helperMaxLines: 2,
           ),
         ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(_error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
       ]),
       actions: [
         TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancelar')),
-        FilledButton(
-            onPressed: () => Navigator.pop(context,
-                (name: _nameCtrl.text.trim(), code: _codeCtrl.text.trim())),
-            child: const Text('Guardar')),
+        FilledButton(onPressed: _save, child: const Text('Guardar')),
       ],
     );
   }

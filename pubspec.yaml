@@ -1,7 +1,7 @@
 name: caja_scanner
 description: App offline-first para registrar pedidos, proveedor y líneas de cajas mediante escaneo de códigos de barras.
 publish_to: "none"
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: ">=3.3.0 <4.0.0"

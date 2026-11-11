@@ -49,7 +49,7 @@ Cada feature depende solo de `core/`; el escáner no sabe nada del negocio.
 2. **Proveedor**: se elige de los datos maestros. Se autorrellena (pedido ya conocido → su proveedor; si no, el último usado) y el usuario puede cambiarlo. Si el que busca no existe, puede crearlo en el momento.
 3. **Líneas** (modelo + cantidad):
    - **Manual**: producto (se elige de los datos maestros) y cantidad.
-   - **Escanear GRAI**: se toma un trozo del código, se busca entre los productos de los datos maestros y se rellena el producto. Si el código no está, el usuario elige (o crea) el producto al que corresponde y queda asociado para siempre.
+   - **Escanear GRAI**: se lee el EAN que va dentro del GRAI, se busca entre los productos de los datos maestros y se rellena el modelo. Si el EAN no está, el usuario elige (o crea) el modelo al que corresponde y queda asociado para siempre.
 4. Todo se guarda en SQLite junto con la **fecha/hora del escaneo** (`scanned_at`, UTC) y estado `pending`.
 5. Al detectar conexión (o con el botón de sincronizar) se envían las capturas pendientes y pasan a `synced`.
 
@@ -57,16 +57,16 @@ Cada feature depende solo de `core/`; el escáner no sabe nada del negocio.
 
 Todo se guarda en la tabla local `settings` y se aplica sin recompilar.
 
-**Identificación de producto**
-- Trozo del código escaneado que identifica el modelo, definido en caracteres: "desde el carácter nº" (1 = el primero) y "nº de caracteres" (por defecto 8 y 4). Si el código lleva delante el identificador 8003, se ignora antes de contar.
-- Campo de prueba: pegas un GRAI de ejemplo y ves al momento qué código de modelo saldría con los valores que has puesto.
+**Lectura del GRAI**
+- El producto se identifica por su **EAN**, que va dentro del GRAI: `8003` + `0` + EAN (13 dígitos) + nº de serie. Ejemplo: `8003 0 8714548186004 7004946272` → EAN `8714548186004`, serie `7004946272`. Este es el formato de EPS; otros propietarios (p. ej. IFCO) pueden codificar el modelo de otra forma.
+- Campo de prueba: pegas un GRAI y ves el EAN, la serie y el modelo que saldría.
 
 **Datos maestros** (también con el icono de la caja en la lista de capturas)
 - **Proveedores**: lista de nombres. Añadir, renombrar y borrar.
-- **Productos**: nombre del modelo de caja y, opcionalmente, su código de GRAI (el trozo definido arriba). Un producto sin código solo se puede usar a mano.
+- **Productos**: nombre del modelo y, opcionalmente, su EAN (se valida el dígito de control). Un producto sin EAN solo se puede usar a mano.
 - Son las únicas opciones que se pueden elegir al capturar; desde el selector también se puede crear uno nuevo al vuelo.
 - Borrar un dato maestro no cambia las capturas ya guardadas.
-- Con API, `GET {url}/catalogs` puede devolver `{"models": {"codigoGrai": "Nombre"}, "suppliers": ["Proveedor"], "orderSuppliers": {"pedido": "Proveedor"}}` y se fusiona con lo local.
+- Con API, `GET {url}/catalogs` puede devolver `{"models": {"8714548186004": "Nombre"}, "suppliers": ["Proveedor"], "orderSuppliers": {"pedido": "Proveedor"}}` y se fusiona con lo local.
 
 **Envío de datos** (selector Ninguno / API / Email)
 - **API**: URL base y token opcional. Se envía automáticamente al recuperar la conexión. Endpoints esperados: `POST {url}/captures` (idempotente por `id`) y `GET {url}/catalogs`. Adáptalos en `HttpRemoteApi`.

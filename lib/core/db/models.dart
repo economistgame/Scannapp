@@ -77,10 +77,10 @@ class Capture {
 }
 
 /// Producto (modelo de caja) de los datos maestros.
-/// [code] es el trozo del GRAI que lo identifica; null = solo se usa a mano.
+/// [ean] es el EAN que lo identifica dentro del GRAI; null = solo se usa a mano.
 class Product {
-  const Product({required this.id, required this.name, this.code});
+  const Product({required this.id, required this.name, this.ean});
   final int id;
   final String name;
-  final String? code;
+  final String? ean;
 }

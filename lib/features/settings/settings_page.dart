@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/db/app_database.dart';
 import '../grai/grai_parser.dart';
 import '../masterdata/master_data_page.dart';
 
 /// Ajustes:
-///  - Identificación de producto: qué trozo del GRAI identifica el modelo y
-///    catálogo código -> modelo.
+///  - Lectura del GRAI (prueba) y acceso a los datos maestros.
 ///  - Envío de datos: ninguno / API / email.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.db});
@@ -18,8 +16,6 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  final _startCtrl = TextEditingController();
-  final _lengthCtrl = TextEditingController();
   final _apiUrlCtrl = TextEditingController();
   final _apiTokenCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
@@ -35,9 +31,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     final db = widget.db;
-    final slice = await db.graiModelSlice();
-    _startCtrl.text = '${slice.start}';
-    _lengthCtrl.text = '${slice.length}';
     _apiUrlCtrl.text = await db.getSetting('api_base_url') ?? '';
     _apiTokenCtrl.text = await db.getSetting('api_token') ?? '';
     _emailCtrl.text = await db.getSetting('email_to') ?? '';
@@ -48,8 +41,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     for (final c in [
-      _startCtrl,
-      _lengthCtrl,
       _apiUrlCtrl,
       _apiTokenCtrl,
       _emailCtrl,
@@ -61,12 +52,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _save() async {
-    final start = int.tryParse(_startCtrl.text);
-    final length = int.tryParse(_lengthCtrl.text);
-    if (start == null || length == null || start < 1 || length < 1 || start - 1 + length > 60) {
-      _snack('Indica un carácter inicial (≥ 1) y un nº de caracteres (≥ 1)');
-      return;
-    }
     if (_mode == 'api' && _apiUrlCtrl.text.trim().isEmpty) {
       _snack('Indica la URL de la API');
       return;
@@ -76,7 +61,6 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     final db = widget.db;
-    await db.setGraiModelSlice(start, length);
     await db.setSetting('sync_mode', _mode);
     await db.setSetting('api_base_url', _apiUrlCtrl.text.trim());
     await db.setSetting('api_token', _apiTokenCtrl.text.trim());
@@ -87,17 +71,28 @@ class _SettingsPageState extends State<SettingsPage> {
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  /// Previsualiza qué código de modelo saldría con los valores actuales.
-  String get _preview {
-    final start = int.tryParse(_startCtrl.text);
-    final length = int.tryParse(_lengthCtrl.text);
-    if (start == null || length == null || _sampleCtrl.text.trim().isEmpty) {
-      return '—';
+  String _preview = '';
+
+  /// Lee el GRAI de prueba y muestra el EAN, la serie y el modelo que sale.
+  Future<void> _updatePreview() async {
+    final raw = _sampleCtrl.text;
+    if (raw.trim().isEmpty) {
+      setState(() => _preview = '');
+      return;
     }
-    final parser = GraiParser(start: start, length: length);
-    final code = parser.extractModelCode(_sampleCtrl.text);
-    if (code != null) return code;
-    return 'el código es demasiado corto (mín. ${parser.minChars} caracteres)';
+    final g = const GraiParser().parse(raw);
+    if (g == null) {
+      setState(() => _preview = 'No parece un GRAI: 14 dígitos que empiecen '
+          'por 0, con o sin 8003 delante');
+      return;
+    }
+    final name = await widget.db.productNameForEan(g.ean);
+    if (!mounted || raw != _sampleCtrl.text) return;
+    final serial = g.serial.isEmpty ? '—' : g.serial;
+    final model = name == null
+        ? 'Este EAN no está en los datos maestros'
+        : 'Modelo: $name';
+    setState(() => _preview = 'EAN ${g.ean} · serie $serial\n$model');
   }
 
   @override
@@ -112,55 +107,28 @@ class _SettingsPageState extends State<SettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                Text('Identificación de producto (GRAI)', style: t),
+                Text('Lectura del GRAI', style: t),
                 const SizedBox(height: 8),
                 const Text(
-                    'Trozo del código escaneado (en caracteres) que identifica el modelo de caja. '
-                    'Cuenta desde el primer carácter del GRAI; si el código lleva delante el '
-                    'identificador 8003, se ignora.'),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _startCtrl,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                          labelText: 'Desde el carácter nº',
-                          helperText: '1 = el primero',
-                          border: OutlineInputBorder()),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      controller: _lengthCtrl,
-                      keyboardType: TextInputType.number,
-                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                      decoration: const InputDecoration(
-                          labelText: 'Nº de caracteres',
-                          border: OutlineInputBorder()),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ),
-                ]),
+                    'El modelo se identifica por su EAN, que va dentro del GRAI: '
+                    '8003 + 0 + EAN (13 dígitos) + nº de serie. Define cada EAN y '
+                    'su nombre en Datos maestros.'),
                 const SizedBox(height: 12),
                 TextField(
                   controller: _sampleCtrl,
                   decoration: InputDecoration(
                     labelText: 'Prueba: pega un GRAI de ejemplo',
-                    helperText: 'Código de modelo resultante: $_preview',
+                    helperText: _preview.isEmpty ? null : _preview,
+                    helperMaxLines: 3,
                     border: const OutlineInputBorder(),
                   ),
-                  onChanged: (_) => setState(() {}),
+                  onChanged: (_) => _updatePreview(),
                 ),
-                const SizedBox(height: 16),
                 const Divider(height: 32),
                 Text('Datos maestros', style: t),
                 const SizedBox(height: 8),
                 const Text(
-                    'Listas de proveedores y de productos (con su código de GRAI). '
+                    'Listas de proveedores y de productos (con su EAN). '
                     'Al capturar solo se puede elegir lo que haya aquí.'),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
