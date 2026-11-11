@@ -100,7 +100,7 @@ Todo se guarda en la tabla local `settings` y se aplica sin recompilar.
 El workflow `.github/workflows/build.yml` compila en cada push a `main`, en cada pull request y manualmente (pestaña **Actions → Build → Run workflow**).
 
 - **Android**: genera un APK instalable (`scannapp-android-apk`), firmado con la clave de depuración.
-- **iOS**: en las compilaciones normales solo comprueba que el código compila, sin generar ningún archivo. Al publicar una versión genera además un `.ipa` sin firmar y lo adjunta a la release. No se instala tal cual en un iPhone: hace falta firmarlo (Apple Developer, o una herramienta de sideloading como AltStore o Sideloadly, que lo firma con un Apple ID gratuito y caduca a los 7 días).
+- **iOS**: genera un `.ipa` sin firmar (`scannapp-ios-ipa`) en cada compilación y, al publicar una versión, lo adjunta a la release. No se instala tal cual en un iPhone: hace falta firmarlo (Apple Developer, o una herramienta de sideloading como AltStore o Sideloadly, que lo firma con un Apple ID gratuito y caduca a los 7 días).
 
 Las carpetas `android/` e `ios/` se generan en CI con `tool/bootstrap_platforms.sh`, que además aplica el permiso de cámara, el `mailto` del envío por email y las versiones mínimas (Android 23, iOS 15.5). Si generas esas carpetas en local y las subes al repositorio, el script respeta lo que ya exista.
 

@@ -56,16 +56,13 @@ jobs:
       - run: flutter pub get
       - name: Compilar iOS (sin firma)
         run: flutter build ios --release --no-codesign
-      # Solo al publicar una versión se genera el .ipa; en una compilación normal
-      # basta con comprobar que compila y no se guarda nada.
+      # El .ipa es el formato propio de iOS (sin firmar), no un zip aparte.
       - name: Generar IPA sin firmar
-        if: env.RELEASE_TAG != ''
         run: |
           mkdir Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
           zip -qry Scannapp-unsigned.ipa Payload
       - name: Guardar IPA
-        if: env.RELEASE_TAG != ''
         uses: actions/upload-artifact@v4
         with:
           name: scannapp-ios-ipa
